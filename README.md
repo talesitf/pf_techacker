@@ -32,6 +32,10 @@ aws cloudformation create-stack --stack-name <stack-name> --template-body <file:
 
 Além desse Readme, existem mais relatórios disponíveis na pasta `relatórios`, que são responsáveis por documentar o desenvolvimento e testes de segurança da aplicação.
 
+## Vídeo de apresentação
+
+O vídeo de apresentação da aplicação está disponível em: [Vídeo](https://www.youtube.com/watch?v=yW01yNsI8hw)
+
 ## Autores
 
 - Tales Ivalque Taveira de Freitas
