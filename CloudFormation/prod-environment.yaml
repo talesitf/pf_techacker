@@ -7,7 +7,7 @@ Parameters:
     Description: Name of the SSH key pair for EC2 access
   InstanceType:
     Type: String
-    Default: t3.micro
+    Default: t3.small
     Description: EC2 instance type
     AllowedValues:
       - t2.micro
@@ -22,13 +22,13 @@ Parameters:
     Type: String
     Description: Pinecone API Key for the application
     NoEcho: true  # Hides the value from being displayed in plain text
-    
+  
 Resources:
   # VPC
   ProdVPC:
     Type: AWS::EC2::VPC
     Properties:
-      CidrBlock: 10.1.0.0/16
+      CidrBlock: 10.3.0.0/16
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
@@ -40,7 +40,7 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref ProdVPC
-      CidrBlock: 10.1.1.0/24
+      CidrBlock: 10.3.1.0/24
       MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
@@ -94,6 +94,39 @@ Resources:
         - IpProtocol: -1
           CidrIp: 0.0.0.0/0
 
+  EC2IAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: DynamoDBAccessPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:ListTables
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/prod_streamlit_table"
+
+  # IAM Instance Profile for EC2
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2IAMRole
+
   # EC2 Instance
   ProdInstance:
     Type: AWS::EC2::Instance
@@ -104,6 +137,7 @@ Resources:
         - !Ref ProdSecurityGroup
       SubnetId: !Ref ProdPublicSubnet
       ImageId: ami-0c80e2b6ccb9ad6d1  # Amazon Linux 2023 AMI
+      IamInstanceProfile: !Ref EC2InstanceProfile  # Attach IAM Role here
       UserData:
         Fn::Base64:
           Fn::Sub: |
@@ -111,24 +145,31 @@ Resources:
             sudo yum update -y
             # Install Git
             sudo yum install -y git
-            # Ensure pip is installed and upgrade it
-            sudo python3 -m ensurepip --upgrade
-            sudo python3 -m pip install --upgrade pip
+            # Install Python 3.11
+            sudo dnf install python3.11 -y
+            # Configure Python 3.11 as default
+            sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.9 2
+            sudo update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+            sudo update-alternatives --set python3 /usr/bin/python3.11
+            # Ensure pip is installed for Python 3.11 and upgrade it
+            sudo python3.11 -m ensurepip --upgrade
+            sudo python3.11 -m pip install --upgrade pip
             # Clone and set up the application
             cd /home/ec2-user
             git clone https://github.com/talesitf/cautious-enigma.git streamlit_app
             cd streamlit_app
-            git checkout test
+            git checkout main
             sudo git config --global --add safe.directory /home/ec2-user/streamlit_app
-            # Install dependencies from requirements.txt
-            pip3 install -r requirements.txt
+            # Install dependencies from requirements.txt using pip for Python 3.11
+            python3.11 -m pip install -r requirements.txt
             # Set environment variables
-            sudo sh -c "echo 'DYNAMODB_TABLE=test_streamlit_table' >> /etc/environment"
-            sudo sh -c "echo 'APP_ENV=test' >> /etc/environment"
+            sudo sh -c "echo 'DYNAMODB_TABLE=prod_streamlit_table' >> /etc/environment"
+            sudo sh -c "echo 'APP_ENV=prod' >> /etc/environment"
             sudo sh -c "echo 'OPENAI_API_KEY=${OpenAIAPIKey}' >> /etc/environment"
             sudo sh -c "echo 'PINECONE_API_KEY=${PineconeAPIKey}' >> /etc/environment"
             # Start the Streamlit application
-            nohup streamlit run app.py --server.port 8501 --server.address 0.0.0.0 > streamlit.log 2>&1 &
+            nohup python3.11 -m streamlit run app.py --server.port 8501 --server.address 0.0.0.0 > streamlit.log 2>&1 &
+
 
   # DynamoDB Table
   DynamoDBTable:
